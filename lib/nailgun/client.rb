@@ -1,14 +1,10 @@
 require_relative 'client/chunk'
 require_relative 'client/chunk_header'
 require 'socket'
-require 'io/wait'
-require 'logger'
 require 'timeout'
 
 module Nailgun
   class Client
-    LOGGER = Logger.new('log')
-
     attr_reader :opts, :socket
 
     # Public: Convinience method to instantiate and run the command
@@ -28,7 +24,6 @@ module Nailgun
     def initialize(opts = {})
       @opts = Nailgun::DEFAULTS.merge(opts)
       @socket = TCPSocket.new(*@opts.values_at(:hostname, :port))
-      debug "Opened new #{@socket.inspect}"
     end
 
     # Public: Run a command on the Client instance
@@ -113,7 +108,6 @@ module Nailgun
     # content = nil - the actual content
     def send_chunk(type, content = nil)
       chunk = Chunk.new(type, content).to_s
-      debug "Sending #{type} chunk: #{content.inspect}"
       socket.write chunk
     end
 
@@ -121,14 +115,8 @@ module Nailgun
     def receive_chunk
       Timeout.timeout(Nailgun::TIMEOUT, Nailgun::TimeoutError) do
         length, type = receive_header
-        if length == 0
-          debug "Received #{type} chunk with no content"
-        else
-          debug "About to read #{type} chunk (#{length} B). Content follows (until <<<< END CHUNK >>>>) "
-
+        if length > 0
           content = socket.read(length)
-
-          LOGGER << (content + "<<<< END CHUNK >>>>\n")
         end
 
         handle_chunk(type, content)
@@ -165,28 +153,6 @@ module Nailgun
         raise ex.new
       else
         raise Nailgun::OtherError.new(code.to_s)
-      end
-    end
-
-    # Private: Debug log message
-    def debug(message)
-      LOGGER.debug(message)
-    end
-
-    # Extend the return value with a success? method akin to Process::Status, which I can't figure
-    # out how to instantiate manually
-    class ExitStatus
-      def initialize(value)
-        @val = value
-      end
-      def success?
-        @val == 0
-      end
-      def method_missing(*args)
-        @val.send(*args)
-      end
-      def inspect
-        @val.inspect
       end
     end
 
