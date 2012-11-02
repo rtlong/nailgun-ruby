@@ -5,6 +5,51 @@ require 'timeout'
 
 module Nailgun
   class Client
+
+    DEFAULTS = {
+      hostname:  'localhost',
+      port:      2113,
+      stdin:     nil,
+      stdout:    STDOUT,
+      stderr:    STDERR,
+      env:       ENV,
+      dir:       Dir.pwd
+    }.freeze
+
+    CHUNK_HEADER_LEN = 5
+
+    TIMEOUT = 5
+
+    TimeoutError             = Class.new(StandardError)
+    SocketFailedError        = Class.new(StandardError)
+    ConnectFailedError       = Class.new(StandardError)
+    UnexpectedChunktypeError = Class.new(StandardError)
+    ServerExceptionError     = Class.new(StandardError)
+    ConnectionBrokenError    = Class.new(StandardError)
+    BadArgumentsError        = Class.new(StandardError)
+    OtherError               = Class.new(StandardError)
+
+    EXIT_CODE_EXCEPTIONS = {
+      999 => SocketFailedError,
+      998 => ConnectFailedError,
+      997 => UnexpectedChunktypeError,
+      996 => ServerExceptionError,
+      995 => ConnectionBrokenError,
+      994 => BadArgumentsError
+    }.freeze
+
+    CHUNK_TYPES = {
+      stdin:     '0',
+      stdout:    '1',
+      stderr:    '2',
+      stdin_eof: '.',
+      arg:       'A',
+      env:       'E',
+      dir:       'D',
+      cmd:       'C',
+      exit:      'X'
+    }.freeze
+
     attr_reader :opts, :socket
 
     # Public: Convinience method to instantiate and run the command
@@ -20,10 +65,16 @@ module Nailgun
 
     # Public: Initialize a Client.
     #
-    # opts = {} - a Hash of options to override the defaults in Nailgun::DEFAULTS
+    # opts = {} - a Hash of options to override the defaults in DEFAULTS
     def initialize(opts = {})
-      @opts = Nailgun::DEFAULTS.merge(opts)
+      @opts = DEFAULTS.merge(opts)
       @socket = TCPSocket.new(*@opts.values_at(:hostname, :port))
+
+      if block_given?
+        yield self
+        @socket.close
+        return nil
+      end
     end
 
     # Public: Run a command on the Client instance
@@ -53,6 +104,11 @@ module Nailgun
           loop { receive_chunk }
         end
       }
+    end
+
+    # Public: Explicitly close the TCPSocket
+    def close!
+      socket.close
     end
 
     private
@@ -113,7 +169,7 @@ module Nailgun
 
     # Private: get the next chunk from the socket, and then determine what to do with it.
     def receive_chunk
-      Timeout.timeout(Nailgun::TIMEOUT, Nailgun::TimeoutError) do
+      Timeout.timeout(TIMEOUT, TimeoutError) do
         length, type = receive_header
         if length > 0
           content = socket.read(length)
@@ -127,7 +183,7 @@ module Nailgun
     #
     # Returns [length, type]
     def receive_header
-      socket.read(Nailgun::CHUNK_HEADER_LEN).unpack('NA')
+      socket.read(CHUNK_HEADER_LEN).unpack('NA')
     end
 
     # Private: Determine what to do with the received chunk
@@ -135,24 +191,24 @@ module Nailgun
     # type - chunk type
     # content - chunk content
     def handle_chunk(type, content)
-      case t = Nailgun::CHUNK_TYPES.key(type)
+      case t = CHUNK_TYPES.key(type)
       when :stdout, :stderr
         opts[t].write content
       when :exit
         socket.close
         handle_exit(content.to_i)
       else
-        raise Nailgun::UnexpectedChunktypeError.new([type, content].join(?;))
+        raise UnexpectedChunktypeError.new([type, content].join(?;))
       end
     end
 
     def handle_exit(code)
       if code == 0
         throw :exit
-      elsif ex = Nailgun::EXIT_CODE_EXCEPTIONS[code]
+      elsif ex = EXIT_CODE_EXCEPTIONS[code]
         raise ex.new
       else
-        raise Nailgun::OtherError.new(code.to_s)
+        raise OtherError.new(code.to_s)
       end
     end
 

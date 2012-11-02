@@ -2,7 +2,7 @@ module Nailgun
   class Client
     class ChunkHeader
       def initialize(type, content_length)
-        @type = Nailgun::CHUNK_TYPES[type]
+        @type = Client::CHUNK_TYPES[type]
         @content_length = content_length
       end
 

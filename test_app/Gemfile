@@ -3,3 +3,5 @@ source "https://rubygems.org"
 
 gem 'nailgun', github: 'amardaxini/nailgun'
 gem "ng", path: '../'
+
+gem 'pry'
